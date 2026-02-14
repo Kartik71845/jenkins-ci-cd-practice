@@ -2,20 +2,20 @@ pipeline {
     agent any
 
     stages {
-
-        stage('Clone') {
+        stage('Checkout') {
             steps {
-                git branch: 'main',
-                    url: 'https://github.com/Kartik71845/jenkins-ci-cd-practice.git'
+                checkout scm
             }
         }
 
         stage('Deploy') {
             steps {
                 sh '''
-                    docker compose version || docker-compose version
-                    docker compose down || docker-compose down || true
-                    docker compose up -d --build || docker-compose up -d --build
+                    echo "Stopping containers..."
+                    docker-compose down || true
+                    
+                    echo "Starting application..."
+                    docker-compose up -d --build
                 '''
             }
         }
