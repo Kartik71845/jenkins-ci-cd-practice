@@ -1,9 +1,12 @@
-FROM node:18-alpine
+FROM python:3.10-slim
+
 WORKDIR /app
-COPY app.js .
-ENV PORT=3000
-EXPOSE 3000
-ENV NODE_ENV=dev
-ENV APP_NAME=DockerApp
-ENTRYPOINT ["node"]
-CMD ["app.js"]s
+
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY . .
+
+EXPOSE 5000
+
+CMD ["python", "app.py"]
