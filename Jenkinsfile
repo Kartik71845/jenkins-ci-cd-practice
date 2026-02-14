@@ -10,8 +10,8 @@ pipeline {
         stage("Build and Test") {
             steps {
                 sh '''
-                docker compose down || true
-                docker compose up -d --build
+                docker build -t flask-app:latest .
+                docker run -d -p 5000:80 --name docker_flask flask-app:latest
                 '''
             }
         
