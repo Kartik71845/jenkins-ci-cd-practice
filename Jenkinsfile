@@ -7,7 +7,7 @@ pipeline {
                 }   
             }
         
-        stage("Build and Test")
+        stage("Build and Test") {
             steps {
                 sh '''
                 docker build -t dockerized_app:lates
@@ -19,3 +19,4 @@ pipeline {
         }
 
     }
+}
