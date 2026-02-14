@@ -10,7 +10,7 @@ pipeline {
         stage("Build and Test") {
             steps {
                 sh '''
-                docker build -t dockerized_app:lates
+                docker build -t dockerized_app:latest .
                 docker compose down || true
                 docker compose up -d --build
                 '''
