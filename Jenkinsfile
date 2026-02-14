@@ -11,8 +11,7 @@ pipeline {
             steps {
                 sh '''
                 docker build -t flask-app:latest .
-                docker run -d -p 5000:80 --name docker_flask flask-app:latest
-                '''
+                docker run -d -p 5000:80 flask-app:latest
             }
         
         }
