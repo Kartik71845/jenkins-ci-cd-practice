@@ -8,10 +8,8 @@ pipeline {
 
     stages {
 
-        stage('Clone') {
+        stage('Prepare_Tag ') {
             steps {
-                git branch: 'main', url: 'https://github.com/Kartik71845/Docker_cicd.git'
-                
                 script {
                     // Take first 7 characters of commit SHA
                     env.IMAGE_TAG = env.GIT_COMMIT.take(7)
@@ -30,8 +28,8 @@ pipeline {
                 sh ''' 
                 docker rm -f node_app || true
                 docker run -d -p 4000:3000 --name node_app ${DOCKER_USER}/${IMAGE_NAME}:${IMAGE_TAG} 
-                sleep 10
-                curl http://localhost:4000
+                sleep 5
+                docker exec node_app curl http://localhost:3000
                 docker rm -f node_app 
                 '''
             }
