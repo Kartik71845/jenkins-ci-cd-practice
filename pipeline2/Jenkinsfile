@@ -1,0 +1,43 @@
+pipeline {
+    agent any
+
+    environment {
+        DOCKER_USER = "kartik71845"
+        IMAGE_NAME  = "my_app"
+    }
+
+    stages {
+
+        stage('Clone') {
+            steps {
+                git branch: 'main', url: 'https://github.com/Kartik71845/Docker_cicd.git'
+                
+                script {
+                    // Take first 7 characters of commit SHA
+                    env.IMAGE_TAG = env.GIT_COMMIT.take(7)
+                }
+            }
+        }
+
+        stage('Build') {
+            steps {
+                sh "docker build -t ${DOCKER_USER}/${IMAGE_NAME}:${IMAGE_TAG} ."
+            }
+        }
+
+        stage('Push') {
+            steps {
+                withCredentials([usernamePassword(
+                    credentialsId: 'dockerhubcreds',
+                    usernameVariable: 'DOCKER_USER_VAR',
+                    passwordVariable: 'DOCKER_PASS_VAR'
+                )]) {
+                    sh """
+                    echo \$DOCKER_PASS_VAR | docker login -u \$DOCKER_USER_VAR --password-stdin
+                    docker push ${DOCKER_USER}/${IMAGE_NAME}:${IMAGE_TAG}
+                    """
+                }
+            }
+        }
+    }
+}
