@@ -31,8 +31,8 @@ pipeline {
                 sh ''' 
                 docker rm -f node_app || true
                 docker run -d -p 4000:3000 --name node_app ${DOCKER_USER}/${IMAGE_NAME}:${IMAGE_TAG} 
-                sleep 5
-                docker exec node_app curl http://localhost:3000
+                sleep 10
+                docker inspect -f '{{.State.Health.Status}}' node_app | grep healthy
                 docker rm -f node_app 
                 '''
             }
