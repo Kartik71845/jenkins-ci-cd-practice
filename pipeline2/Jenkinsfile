@@ -25,6 +25,12 @@ pipeline {
             }
         }
 
+        stage('Test') {
+            steps {
+                sh " docker run -d -p 4000:3000 --name node_app ${DOCKER_USER}/${IMAGE_NAME}:${IMAGE_TAG} "
+            }
+        }
+
         stage('Push') {
             steps {
                 withCredentials([usernamePassword(
