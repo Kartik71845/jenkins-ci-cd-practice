@@ -13,13 +13,16 @@ pipeline {
                 script {
                     // Take first 7 characters of commit SHA
                     env.IMAGE_TAG = env.GIT_COMMIT.take(7)
+                    echo "Using tag: ${env.IMAGE_TAG}"
                 }
             }
         }
 
         stage('Build') {
             steps {
-                sh "docker build -t ${DOCKER_USER}/${IMAGE_NAME}:${IMAGE_TAG} ."
+                dir('pipeline2') {
+                 sh "docker build -t ${DOCKER_USER}/${IMAGE_NAME}:${IMAGE_TAG} ."   
+                }
             }
         }
 
