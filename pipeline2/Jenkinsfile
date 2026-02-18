@@ -27,7 +27,13 @@ pipeline {
 
         stage('Test') {
             steps {
-                sh " docker run -d -p 4000:3000 --name node_app ${DOCKER_USER}/${IMAGE_NAME}:${IMAGE_TAG} "
+                sh ''' 
+                docker rm -f node_app || true
+                docker run -d -p 4000:3000 --name node_app ${DOCKER_USER}/${IMAGE_NAME}:${IMAGE_TAG} 
+                sleep 10
+                curl http://localhost:4000
+                docker rm -f node_app 
+                '''
             }
         }
 
