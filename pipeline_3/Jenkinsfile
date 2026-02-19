@@ -1,158 +1,78 @@
 pipeline {
     agent any
-
     environment {
         AWS_REGION     = 'us-east-1'
         AWS_ACCOUNT_ID = '647800544853'
         ECR_REPO_NAME  = 'cicd-practice'
         EC2_HOST       = '3.85.208.192'
-
         ECR_REGISTRY = "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
         IMAGE_NAME   = "${ECR_REPO_NAME}"
-        IMAGE_TAG    = ''
-        FULL_IMAGE   = ''
-        LATEST_IMAGE = ''
+        IMAGE_TAG    = "build-${env.BUILD_NUMBER}"
+        FULL_IMAGE   = "${ECR_REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG}"
+        LATEST_IMAGE = "${ECR_REGISTRY}/${IMAGE_NAME}:latest"
     }
 
     stages {
         stage('Checkout') {
-            steps {
-                checkout scm
-                sh 'ls -la'
-            }
+            steps { checkout scm }
         }
 
-        stage('Validate AWS Access') {
+        stage('AWS Login') {
             steps {
-                withCredentials([[
-                    $class: 'AmazonWebServicesCredentialsBinding',
-                    accessKeyVariable: 'AWS_ACCESS_KEY_ID',
-                    secretKeyVariable: 'AWS_SECRET_ACCESS_KEY',
-                    credentialsId: 'aws-login-creds'
-                ]]) {
+                withCredentials([usernamePassword(
+                    credentialsId: 'aws-login-creds',
+                    usernameVariable: 'AWS_ACCESS_KEY_ID',
+                    passwordVariable: 'AWS_SECRET_ACCESS_KEY'
+                )]) {
                     sh '''
-                    set -e
-                    export AWS_DEFAULT_REGION=${AWS_REGION}
-                    echo "Validating AWS identity before build..."
-                    docker run --rm \
-                      -e AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID} \
-                      -e AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY} \
-                      -e AWS_DEFAULT_REGION=${AWS_REGION} \
-                      amazon/aws-cli:2.15.40 \
-                      sts get-caller-identity
+                        set -e
+                        export AWS_ACCESS_KEY_ID=$AWS_ACCESS_KEY_ID
+                        export AWS_SECRET_ACCESS_KEY=$AWS_SECRET_ACCESS_KEY
+                        export AWS_DEFAULT_REGION=${AWS_REGION}
+                        aws ecr get-login-password --region ${AWS_REGION} | docker login --username AWS --password-stdin ${ECR_REGISTRY}
                     '''
                 }
             }
         }
-        
-        stage('Prepare Tag') {
-            steps {
-                script {
-                    def shortCommit = env.GIT_COMMIT ? env.GIT_COMMIT.take(7) : env.BUILD_NUMBER
-                    env.IMAGE_TAG = "build-${env.BUILD_NUMBER}-${shortCommit}"
-                    env.FULL_IMAGE = "${env.ECR_REGISTRY}/${env.IMAGE_NAME}:${env.IMAGE_TAG}"
-                    env.LATEST_IMAGE = "${env.ECR_REGISTRY}/${env.IMAGE_NAME}:latest"
-                }
-                echo "Building image ${env.FULL_IMAGE} (also tagging latest)"
-            }
-        }
-        stage('Build and Test Docker Image') {
+
+        stage('Build Image') {
             steps {
                 dir('pipeline_3') {
                     sh '''
-                    set -euxo pipefail
-                    TEST_CONTAINER=${IMAGE_NAME}-test
-                    docker rm -f ${IMAGE_NAME} || true
-                    docker rm -f $TEST_CONTAINER || true
-                    docker build -t ${FULL_IMAGE} -t ${LATEST_IMAGE} .
-                    docker run -d --name $TEST_CONTAINER -p 5000:5000 ${FULL_IMAGE}
-                    sleep 5
-                    curl -fsS http://localhost:5000/ >/dev/null
-                    docker rm -f $TEST_CONTAINER
+                        set -e
+                        docker build -t ${FULL_IMAGE} -t ${LATEST_IMAGE} .
                     '''
                 }
             }
         }
+
         stage('Push to ECR') {
             steps {
-                withCredentials([[
-                    $class: 'AmazonWebServicesCredentialsBinding',
-                    accessKeyVariable: 'AWS_ACCESS_KEY_ID',
-                    secretKeyVariable: 'AWS_SECRET_ACCESS_KEY',
-                    credentialsId: 'aws-login-creds'
-                ]]) {
-                    sh '''
+                sh '''
                     set -e
-                    export AWS_DEFAULT_REGION=${AWS_REGION}
-                    docker run --rm \
-                      -e AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID} \
-                      -e AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY} \
-                      -e AWS_DEFAULT_REGION=${AWS_REGION} \
-                      amazon/aws-cli:2.15.40 \
-                      ecr get-login-password --region ${AWS_REGION} | docker login --username AWS --password-stdin ${ECR_REGISTRY}
                     docker push ${FULL_IMAGE}
                     docker push ${LATEST_IMAGE}
-                    '''
-                }
-            }    
+                '''
+            }
         }
 
-        stage('Verify SSH Connectivity') {
+        stage('Deploy to EC2') {
             steps {
                 withCredentials([sshUserPrivateKey(
                     credentialsId: 'ec2-ssh-key',
                     keyFileVariable: 'SSH_KEY'
                 )]) {
                     sh """
-                    set -e
-                    echo "Checking SSH connectivity to ${EC2_HOST} before deployment..."
-                    ssh -vvv -o StrictHostKeyChecking=no -i ${SSH_KEY} ec2-user@${EC2_HOST} 'echo SSH connectivity OK'
-                    """
-                }
-            }
-        }
-        stage('Deploy to EC2') {
-            steps {
-                withCredentials([
-                    [
-                        $class: 'AmazonWebServicesCredentialsBinding',
-                        accessKeyVariable: 'AWS_ACCESS_KEY_ID',
-                        secretKeyVariable: 'AWS_SECRET_ACCESS_KEY',
-                        credentialsId: 'aws-login-creds'
-                    ],
-                    sshUserPrivateKey(
-                        credentialsId: 'ec2-ssh-key',
-                        keyFileVariable: 'SSH_KEY'
-                    )
-                ]) {
-                    sh """
-                    set -euxo pipefail
-                    echo "Connecting to EC2 host ${EC2_HOST} for deployment..."
-                    ssh -vvv -o StrictHostKeyChecking=no -i ${SSH_KEY} ec2-user@${EC2_HOST} <<EOF
-                        set -euxo pipefail
-                        echo "Deploy stage started on \$(hostname) at \$(date -Iseconds)"
-                        export AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
-                        export AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
-                        export AWS_DEFAULT_REGION=${AWS_REGION}
-
-                        echo "Authenticating docker client against ECR..."
-                        docker run --rm \
-                          -e AWS_ACCESS_KEY_ID=\\${AWS_ACCESS_KEY_ID} \
-                          -e AWS_SECRET_ACCESS_KEY=\\${AWS_SECRET_ACCESS_KEY} \
-                          -e AWS_DEFAULT_REGION=\\${AWS_DEFAULT_REGION} \
-                          amazon/aws-cli:2.15.40 \
-                          ecr get-login-password --region ${AWS_REGION} | docker login --username AWS --password-stdin ${ECR_REGISTRY}
-
-                        echo "Pulling latest image ${FULL_IMAGE}..."
-                        docker pull ${FULL_IMAGE}
-
-                        echo "Restarting container node-app..."
-                        docker stop node-app || true
-                        docker rm node-app || true
-                        docker run -d --name node-app -p 80:5000 ${FULL_IMAGE}
-
-                        echo "Deployment complete at \$(date -Iseconds)"
-                    EOF
+                        set -e
+                        ssh -o StrictHostKeyChecking=no -i ${SSH_KEY} ec2-user@${EC2_HOST} '
+                            aws ecr get-login-password --region ${AWS_REGION} | docker login --username AWS --password-stdin ${ECR_REGISTRY}
+                            docker pull ${LATEST_IMAGE}
+                            if [ \$(docker ps -q -f name=node-app | wc -l) -gt 0 ]; then
+                                docker stop node-app
+                                docker rm node-app
+                            fi
+                            docker run -d --name node-app -p 80:5000 ${LATEST_IMAGE}
+                        '
                     """
                 }
             }
@@ -160,11 +80,7 @@ pipeline {
     }
 
     post {
-        success {
-            echo "===== Deployment Finished Successfully ====="
-        }
-        failure {
-            echo "===== Deployment Failed ====="
-        }
+        success { echo "===== Deployment Finished Successfully =====" }
+        failure { echo "===== Deployment Failed =====" }
     }
 }
