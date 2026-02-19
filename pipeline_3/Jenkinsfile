@@ -1,0 +1,90 @@
+pipeline {
+    agent any
+    environment {
+        AWS_REGION     = 'us-east-1'
+        AWS_ACCOUNT_ID = '647800544853'
+        ECR_REPO_NAME  = 'cicd-practice'
+        EC2_HOST       = '3.85.208.192'
+
+        ECR_REGISTRY = "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
+        IMAGE_NAME   = "${ECR_REPO_NAME}"
+        IMAGE_TAG    = "build-${env.BUILD_NUMBER}"
+        FULL_IMAGE   = "${ECR_REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG}"
+        LATEST_IMAGE = "${ECR_REGISTRY}/${IMAGE_NAME}:latest"
+    }
+
+    stages {
+        stage('Prepare Tag') {
+            steps {
+                script {
+                    env.IMAGE_TAG = "build-${env.BUILD_NUMBER}"
+                    env.FULL_IMAGE = "${ECR_REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG}"
+                }
+            }
+        }
+    }
+
+        stage ('AWS login'){
+            steps {
+            withCredentials([usernamePassword(
+                    credentialsId: 'aws-login-creds',
+                    usernameVariable: 'AWS_ACCESS_KEY_ID',
+                    passwordVariable: 'AWS_SECRET_ACCESS_KEY'
+                )]) {
+                    sh '''
+                        export AWS_ACCESS_KEY_ID=$AWS_ACCESS_KEY_ID
+                        export AWS_SECRET_ACCESS_KEY=$AWS_SECRET_ACCESS_KEY
+                        export AWS_DEFAULT_REGION=${AWS_REGION}
+
+                        aws ecr get-login-password --region ${AWS_REGION} | docker login --username AWS --password-stdin ${ECR_REGISTRY}
+                    '''
+                }
+            }
+
+        stage('Build and Test Docker Image') {
+            steps {
+                sh ''' 
+                docker rm -f ${IMAGE_NAME} || true
+                docker build -t ${FULL_IMAGE} .
+                docker run -d -p 5000:5000 ${FULL_IMAGE}
+                sleep 5
+                curl -f http://localhost:5000/ || exit 1
+                docker rm -f ${IMAGE_NAME}
+                '''
+            }
+        }
+        stage('Push to ECR') {
+            steps {
+                sh '''
+                docker push ${FULL_IMAGE}
+                docker tag ${FULL_IMAGE} ${LATEST_IMAGE}
+                docker push ${LATEST_IMAGE}
+                '''
+            }    
+            
+        }
+         stage('Deploy to EC2') {
+            steps {
+                withCredentials([sshUserPrivateKey(
+                    credentialsId: 'ec2-ssh-key',
+                    keyFileVariable: 'SSH_KEY'
+                )]) {
+                sh '''
+                ssh -o StrictHostKeyChecking=no -i /path/to/your/key.pem ec2-user@${EC2_HOST} << 'EOF'
+                    export AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+                    export AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+                    export AWS_DEFAULT_REGION=${AWS_REGION}
+
+                    aws ecr get-login-password --region ${AWS_REGION} | docker login --username AWS --password-stdin ${ECR_REGISTRY}
+                    docker pull ${FULL_IMAGE}
+                    docker stop node-app || true
+                    docker rm node-app || true
+                    docker run -d --name node-app -p 80:5000 ${FULL_IMAGE}
+                EOF
+                '''
+                
+                }
+            }
+        }
+    }              
+}
