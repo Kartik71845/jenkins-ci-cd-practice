@@ -31,6 +31,7 @@ pipeline {
                     }
                     env.IMAGE_TAG = "build-${env.BUILD_NUMBER}-${shortCommit}"
                     env.FULL_IMAGE = "${env.ECR_REGISTRY}/${env.IMAGE_NAME}:${env.IMAGE_TAG}"
+                    env.LATEST_IMAGE = "${env.ECR_REGISTRY}/${env.IMAGE_NAME}:latest"
                     echo "Building image ${env.FULL_IMAGE} (also tagging latest)"
                 }
             }
