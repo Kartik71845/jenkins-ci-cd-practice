@@ -8,9 +8,9 @@ pipeline {
 
         ECR_REGISTRY = "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
         IMAGE_NAME   = "${ECR_REPO_NAME}"
-        IMAGE_TAG    = "build-${env.BUILD_NUMBER}"
-        FULL_IMAGE   = "${ECR_REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG}"
-        LATEST_IMAGE = "${ECR_REGISTRY}/${IMAGE_NAME}:latest"
+        IMAGE_TAG    = ''
+        FULL_IMAGE   = ''
+        LATEST_IMAGE = ''
     }
 
     stages {
@@ -24,20 +24,27 @@ pipeline {
         stage('Prepare Tag') {
             steps {
                 script {
-                    env.IMAGE_TAG = "build-${env.BUILD_NUMBER}"
-                    env.FULL_IMAGE = "${ECR_REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG}"
+                    def shortCommit = env.GIT_COMMIT ? env.GIT_COMMIT.take(7) : env.BUILD_NUMBER
+                    env.IMAGE_TAG = "build-${env.BUILD_NUMBER}-${shortCommit}"
+                    env.FULL_IMAGE = "${env.ECR_REGISTRY}/${env.IMAGE_NAME}:${env.IMAGE_TAG}"
+                    env.LATEST_IMAGE = "${env.ECR_REGISTRY}/${env.IMAGE_NAME}:latest"
                 }
+                echo "Building image ${env.FULL_IMAGE} (also tagging latest)"
             }
         }
         stage('Build and Test Docker Image') {
             steps {
                 dir('pipeline_3') {
-                    sh ''' 
+                    sh '''
+                    set -euxo pipefail
+                    TEST_CONTAINER=${IMAGE_NAME}-test
                     docker rm -f ${IMAGE_NAME} || true
-                    docker build -t ${FULL_IMAGE} .
-                    docker run -d --name ${IMAGE_NAME} -p 5000:5000 ${FULL_IMAGE}
+                    docker rm -f $TEST_CONTAINER || true
+                    docker build -t ${FULL_IMAGE} -t ${LATEST_IMAGE} .
+                    docker run -d --name $TEST_CONTAINER -p 5000:5000 ${FULL_IMAGE}
                     sleep 5
-                    docker rm -f ${IMAGE_NAME}
+                    curl -fsS http://localhost:5000/ >/dev/null
+                    docker rm -f $TEST_CONTAINER
                     '''
                 }
             }
