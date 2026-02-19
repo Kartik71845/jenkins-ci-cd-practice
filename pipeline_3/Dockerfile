@@ -10,7 +10,8 @@ COPY package*.json ./
 
 # Install only production dependencies
 RUN npm install --only=production
-RUN apt-get update && apt-get install -y curl
+# Install curl (Alpine uses apk rather than apt-get)
+RUN apk --no-cache add curl
 
 # Copy the rest of the application source code
 COPY . .
