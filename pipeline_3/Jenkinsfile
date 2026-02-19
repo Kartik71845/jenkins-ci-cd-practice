@@ -67,7 +67,6 @@ pipeline {
                       amazon/aws-cli:2.15.40 \
                       ecr get-login-password --region ${AWS_REGION} | docker login --username AWS --password-stdin ${ECR_REGISTRY}
                     docker push ${FULL_IMAGE}
-                    docker tag ${FULL_IMAGE} ${LATEST_IMAGE}
                     docker push ${LATEST_IMAGE}
                     '''
                 }
