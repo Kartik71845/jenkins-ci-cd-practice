@@ -24,12 +24,15 @@ pipeline {
         stage('Prepare Tag') {
             steps {
                 script {
-                    def shortCommit = env.GIT_COMMIT ? env.GIT_COMMIT.take(7) : env.BUILD_NUMBER
+                    def shortCommit = sh(script: 'git rev-parse --short HEAD', returnStdout: true).trim()
+                    if (!shortCommit) {
+                        error('Unable to determine Git commit hash for tagging.')
+                    }
                     env.IMAGE_TAG = "build-${env.BUILD_NUMBER}-${shortCommit}"
                     env.FULL_IMAGE = "${env.ECR_REGISTRY}/${env.IMAGE_NAME}:${env.IMAGE_TAG}"
                     env.LATEST_IMAGE = "${env.ECR_REGISTRY}/${env.IMAGE_NAME}:latest"
+                    echo "Building image ${env.FULL_IMAGE} (also tagging latest)"
                 }
-                echo "Building image ${env.FULL_IMAGE} (also tagging latest)"
             }
         }
         stage('Build and Test Docker Image') {
