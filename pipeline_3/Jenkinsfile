@@ -1,19 +1,21 @@
 pipeline {
     agent any
+
     environment {
         AWS_REGION     = 'us-east-1'
         AWS_ACCOUNT_ID = '647800544853'
         ECR_REPO_NAME  = 'cicd-practice'
         EC2_HOST       = '13.221.131.107'
-        
+
         ECR_REGISTRY = "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
         IMAGE_NAME   = "${ECR_REPO_NAME}"
-        IMAGE_TAG    = "build-${env.BUILD_NUMBER}"
+        IMAGE_TAG    = "build-${BUILD_NUMBER}"
         FULL_IMAGE   = "${ECR_REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG}"
         LATEST_IMAGE = "${ECR_REGISTRY}/${IMAGE_NAME}:latest"
-}
+    }
+
     stages {
-         stage('AWS Login') {
+        stage('AWS Login') {
             steps {
                 withCredentials([usernamePassword(
                     credentialsId: 'aws-login-creds',
@@ -21,19 +23,19 @@ pipeline {
                     passwordVariable: 'AWS_SECRET_ACCESS_KEY'
                 )]) {
                     sh '''
-                        export AWS_ACCESS_KEY_ID=$AWS_ACCESS_KEY_ID
-                        export AWS_SECRET_ACCESS_KEY=$AWS_SECRET_ACCESS_KEY
+                        set -e
                         export AWS_DEFAULT_REGION=${AWS_REGION}
-
                         aws ecr get-login-password --region ${AWS_REGION} \
                         | docker login --username AWS --password-stdin ${ECR_REGISTRY}
                     '''
                 }
             }
         }
+
         stage('Build Docker Image') {
             steps {
                 sh '''
+                    set -e
                     docker build -t ${IMAGE_NAME}:${IMAGE_TAG} .
                     docker tag ${IMAGE_NAME}:${IMAGE_TAG} ${FULL_IMAGE}
                     docker tag ${IMAGE_NAME}:${IMAGE_TAG} ${LATEST_IMAGE}
@@ -44,16 +46,23 @@ pipeline {
         stage('Test Docker Image') {
             steps {
                 sh '''
-                    docker run --rm ${FULL_IMAGE} curl -f http://localhost:8080/ || exit 1
+                    set -e
+                    docker rm -f cicd_practice_test >/dev/null 2>&1 || true
+                    docker run -d --name cicd_practice_test -p 5001:5000 ${FULL_IMAGE}
+                    sleep 8
+                    curl -f http://localhost:5001/
+                    docker rm -f cicd_practice_test
                 '''
             }
         }
+
         stage('Push to ECR') {
             steps {
                 sh '''
-                   docker push ${FULL_IMAGE}
-                   docker push ${LATEST_IMAGE}
-                ''' 
+                    set -e
+                    docker push ${FULL_IMAGE}
+                    docker push ${LATEST_IMAGE}
+                '''
             }
         }
 
@@ -65,33 +74,32 @@ pipeline {
                     usernameVariable: 'SSH_USER'
                 )]) {
                     sh '''
-                        scp -i ${SSH_KEY_PATH} deploy.sh ${SSH_USER}@${EC2_HOST}:/tmp/
-                        ssh -i ${SSH_KEY_PATH} ${SSH_USER}@${EC2_HOST} 'bash /tmp/deploy.sh ${FULL_IMAGE}'
-                        aws ecr get-login-password --region ${AWS_REGION} \
-                        | docker login --username AWS --password-stdin ${ECR_REGISTRY}
-                        docker pull ${LATEST_IMAGE}
-                        if [ \$(docker ps -q -f name=cicd_practice | wc -l) -gt 0 ]; then
-                                docker stop cicd_practice
-                                docker rm cicd_practice
-                        fi
-                        docker run -d --name cicd_practice -p 5000:5000 ${FULL_IMAGE}
+                        set -e
+                        ssh -o StrictHostKeyChecking=no -i ${SSH_KEY_PATH} ${SSH_USER}@${EC2_HOST} "
+                            set -e
+                            aws ecr get-login-password --region ${AWS_REGION} \
+                            | docker login --username AWS --password-stdin ${ECR_REGISTRY}
+                            docker pull ${LATEST_IMAGE}
+                            if [ \\$(docker ps -aq -f name=^cicd_practice$ | wc -l) -gt 0 ]; then
+                                docker rm -f cicd_practice
+                            fi
+                            docker run -d --name cicd_practice -p 5000:5000 ${LATEST_IMAGE}
+                        "
                     '''
                 }
             }
         }
+    }
 
-        post {
+    post {
         success {
-            echo "===== Deployment Finished Successfully ====="
+            echo '===== Deployment Finished Successfully ====='
         }
         failure {
-            echo "===== Deployment Failed ====="
+            echo '===== Deployment Failed ====='
+        }
+        always {
+            sh 'docker rm -f cicd_practice_test >/dev/null 2>&1 || true'
         }
     }
-}
-    
-
-
-
-
 }
